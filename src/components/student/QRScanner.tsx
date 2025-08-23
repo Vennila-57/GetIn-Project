@@ -37,8 +37,6 @@ const QRScanner: React.FC = () => {
   const streamRef = useRef<MediaStream | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const [manualInput, setManualInput] = useState("");
-  // Use Html5Qrcode type from html5-qrcode
-  // Import type only if available, otherwise fallback to unknown
   type CameraConfig = { facingMode: string };
   type Html5QrcodeConfig = { fps: number; qrbox: number };
   type Html5QrcodeType = {
@@ -49,10 +47,11 @@ const QRScanner: React.FC = () => {
       onError: (errorMessage: string) => void
     ) => void;
     stop: () => Promise<void>;
+    clear?: () => Promise<void>;
   };
   const html5QrcodeRef = useRef<Html5QrcodeType | null>(null);
 
-  const stopScan = () => {
+  const stopScan = async () => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
@@ -64,24 +63,32 @@ const QRScanner: React.FC = () => {
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
+    if (html5QrcodeRef.current) {
+      try {
+        await html5QrcodeRef.current.stop();
+        if (html5QrcodeRef.current.clear) await html5QrcodeRef.current.clear();
+      } catch {
+        // ignore cleanup errors
+      }
+      html5QrcodeRef.current = null;
+      const regionElem = document.getElementById("html5qr-code-full-region");
+      if (regionElem) regionElem.style.display = "none";
+    }
     setIsScanning(false);
   };
 
   const startScan = async () => {
-  setIsScanning(true);
-  setScanResult(null);
-  setLoading(true);
+    setIsScanning(true);
+    setScanResult(null);
+    setLoading(true);
 
     if (!window.BarcodeDetector) {
       // Fallback to html5-qrcode
       try {
         const { Html5Qrcode } = await import("html5-qrcode");
         const qrRegionId = "html5qr-code-full-region";
-        // Ensure region is visible before starting
         const regionElem = document.getElementById(qrRegionId);
-        if (regionElem) {
-          regionElem.style.display = "block";
-        }
+        if (regionElem) regionElem.style.display = "block";
         html5QrcodeRef.current = new Html5Qrcode(qrRegionId) as Html5QrcodeType;
         html5QrcodeRef.current.start(
           { facingMode: "environment" },
@@ -92,24 +99,20 @@ const QRScanner: React.FC = () => {
           (decodedText: string) => {
             setLoading(false);
             handleScan(decodedText);
-            html5QrcodeRef.current?.stop();
-            setIsScanning(false);
-            if (regionElem) {
-              regionElem.style.display = "none";
-            }
+            stopScan();
           },
           (errorMessage: string) => {
             setLoading(false);
             setScanResult({ success: false, message: `Camera error: ${errorMessage}` });
-            setIsScanning(false);
-            if (regionElem) {
-              regionElem.style.display = "none";
-            }
+            stopScan();
           }
         );
       } catch {
         setLoading(false);
-        setScanResult({ success: false, message: "Camera access failed or QR code scanning is not supported by this browser. You can enter the QR code manually below." });
+        setScanResult({
+          success: false,
+          message: "Camera access failed or QR code scanning is not supported by this browser. You can enter the QR code manually below."
+        });
         setIsScanning(false);
       }
       return;
@@ -124,20 +127,26 @@ const QRScanner: React.FC = () => {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
       }
-
       const barcodeDetector = new window.BarcodeDetector({
         formats: ["qr_code"],
       });
 
       intervalRef.current = setInterval(async () => {
-        if (!videoRef.current || videoRef.current.paused || !streamRef.current?.active) {
-          return;
-        }
+        if (!videoRef.current || videoRef.current.paused || !streamRef.current?.active) return;
         try {
-          const barcodes = await barcodeDetector.detect(videoRef.current);
-          if (barcodes.length > 0) {
-            handleScan(barcodes[0].rawValue);
-            stopScan();
+          // Use canvas to grab a frame for barcode detection
+          const canvas = document.createElement('canvas');
+          canvas.width = videoRef.current.videoWidth;
+          canvas.height = videoRef.current.videoHeight;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+            // BarcodeDetector expects an ImageBitmapSource (Canvas is valid)
+            const barcodes = await barcodeDetector.detect(canvas);
+            if (barcodes.length > 0) {
+              handleScan(barcodes[0].rawValue);
+              stopScan();
+            }
           }
         } catch {
           // Detection error can be ignored
@@ -146,6 +155,8 @@ const QRScanner: React.FC = () => {
     } catch {
       setScanResult({ success: false, message: "Camera access denied. Please enable camera permissions in your browser settings." });
       setIsScanning(false);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -173,7 +184,6 @@ const QRScanner: React.FC = () => {
       }
     } catch {
       // Not JSON, try as short code
-      // For demo, accept any 8-character alphanumeric code as valid
       if (/^[a-z0-9]{8}$/i.test(data.trim())) {
         markAttendance({
           studentId: user?.id || "STU001",
@@ -195,6 +205,7 @@ const QRScanner: React.FC = () => {
     return () => {
       stopScan(); // Cleanup on component unmount
     };
+    // eslint-disable-next-line
   }, []);
 
   return (
@@ -211,7 +222,7 @@ const QRScanner: React.FC = () => {
               playsInline
             ></video>
             {/* html5-qrcode region: always render, control visibility via JS */}
-            <div id="html5qr-code-full-region" style={{ width: "100%" }}></div>
+            <div id="html5qr-code-full-region" style={{ width: "100%", display: "none" }}></div>
             {!isScanning && (
               <div className="aspect-square bg-white rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center">
                 <div className="text-center">
