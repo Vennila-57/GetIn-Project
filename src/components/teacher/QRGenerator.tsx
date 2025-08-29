@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
 import { QrCode, Download, Clock, Eye } from "lucide-react";
-import { useAuth } from "../../contexts/AuthContext";
 import { useAttendance } from "../../contexts/AttendanceContext";
 import { QRCodeCanvas } from "qrcode.react";
 
@@ -34,21 +33,17 @@ const QRGenerator: React.FC = () => {
     return () => clearInterval(interval);
   }, [isActive, timeRemaining]);
 
-  // Generate a random short code
-  const generateShortCode = (length = 8) => {
-    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-    let code = '';
-    for (let i = 0; i < length; i++) {
-      code += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return code;
-  };
-
+  // Generate QR code with session/subject data
   const generateQRCode = () => {
-  const shortCode = generateShortCode(8);
-  setQrCodeValue(shortCode);
-  setTimeRemaining(validityDuration * 60);
-  setIsActive(true);
+    const classId = "CS101"; // You can make this dynamic if needed
+    const qrData = {
+      subject: selectedSubject,
+      classId,
+      timestamp: Date.now()
+    };
+    setQrCodeValue(JSON.stringify(qrData));
+    setTimeRemaining(validityDuration * 60);
+    setIsActive(true);
   };
 
   const formatTime = (seconds: number) => {
@@ -173,7 +168,7 @@ const QRGenerator: React.FC = () => {
                   </div>
                   {/* Raw QR code string for manual entry */}
                   <div className="mt-6 text-left">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Short Code (for manual entry):</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">QR Data (for manual entry):</label>
                     <div className="flex items-center bg-gray-50 border rounded-lg p-2">
                       <input
                         type="text"
@@ -189,7 +184,7 @@ const QRGenerator: React.FC = () => {
                         onClick={() => navigator.clipboard.writeText(qrCodeValue)}
                       >Copy</button>
                     </div>
-                    <p className="text-xs text-gray-500 mt-2">Students without a camera can copy this code and paste it in their dashboard to mark attendance.</p>
+                    <p className="text-xs text-gray-500 mt-2">Students without a camera can copy this data and paste it in their dashboard to mark attendance.</p>
                   </div>
                 </div>
               ) : (
